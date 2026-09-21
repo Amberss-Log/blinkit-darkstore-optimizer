@@ -1,0 +1,22 @@
+# Core
+pandas>=2.2
+numpy>=1.26
+SQLAlchemy>=2.0
+python-dotenv>=1.0
+
+# Optimization
+pulp>=3.0              # ships with the CBC solver, no separate install
+
+# Database drivers
+PyMySQL>=1.1           # only needed if DATABASE_URL points at MySQL
+                       # SQLite support is built into Python
+
+# Analysis and plotting
+matplotlib>=3.8
+scikit-learn>=1.4      # demand forecasting layer
+
+# Notebook
+jupyterlab>=4.0
+
+# Tests
+pytest>=8.0
