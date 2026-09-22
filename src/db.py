@@ -72,12 +72,19 @@ def backend_name(engine: Engine) -> str:
 
 
 def describe_connection(engine: Engine) -> str:
-    """Connection summary with the password stripped out.
+    """Connection summary that is safe to print in a public notebook.
 
-    Used for notebook output. SQLAlchemy's URL.render_as_string() hides the
-    password by default, which is exactly what we want in a public repo.
+    Two things are stripped. SQLAlchemy's render_as_string() hides the password
+    by default, which handles the MySQL case. The SQLite case needs separate
+    handling: the engine URL holds an absolute path, so printing it verbatim
+    would publish the directory layout of whichever machine ran the notebook.
+    Neither is a serious vulnerability, but neither belongs in a repository
+    strangers will read, and committed notebook output is easy to forget about.
     """
     url = make_url(str(engine.url))
+    if url.get_backend_name() == "sqlite":
+        name = Path(url.database).name if url.database else ":memory:"
+        return f"sqlite:///data/{name}"
     return url.render_as_string(hide_password=True)
 
 
