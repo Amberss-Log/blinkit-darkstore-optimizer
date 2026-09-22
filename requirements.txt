@@ -5,7 +5,10 @@ SQLAlchemy>=2.0
 python-dotenv>=1.0
 
 # Optimization
-pulp>=3.0              # ships with the CBC solver, no separate install
+pulp>=3.0,<4.0         # ships with the CBC solver, no separate install
+                       # upper bound is deliberate: PuLP 4 changes how variables
+                       # are constructed and drops PULP_CBC_CMD, so an unpinned
+                       # install would break this project on a fresh machine
 
 # Database drivers
 PyMySQL>=1.1           # only needed if DATABASE_URL points at MySQL
