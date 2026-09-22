@@ -307,3 +307,53 @@ def sensitivity_sweep(
         rows.append(summary)
 
     return pd.DataFrame(rows).set_index("lambda_capex")
+
+
+def scenario_analysis(
+    localities: pd.DataFrame,
+    facilities: pd.DataFrame,
+    distances: np.ndarray,
+    mask: np.ndarray,
+    demand: np.ndarray,
+    budget: float,
+    multipliers: list[float] | None = None,
+    **kwargs,
+) -> pd.DataFrame:
+    """Re-solve the same model under festive demand multipliers.
+
+    Blinkit has publicly described the capacity strain it faces around Diwali,
+    and the generated data reproduces it: the festive peak in this dataset
+    reaches about 2.5 times the median day. So the top of this sweep is
+    grounded in the data rather than chosen for effect.
+
+    Nothing about the model changes here -- same objective, same constraints,
+    same budget. Only the demand vector is scaled. That is the point: a model
+    worth building is one you can re-point at a different question without
+    rewriting it, and stress testing is the cheapest second result available.
+
+    Watch which constraint binds as the multiplier rises. At normal demand the
+    budget is the limit: there is more capital available than there is demand
+    worth serving. Under festive load capacity becomes the limit instead, and
+    unmet demand grows even though the plan is unchanged -- which is precisely
+    the operational problem quick commerce faces in October.
+    """
+    if multipliers is None:
+        multipliers = [1.0, 1.5, 2.0, 2.5]
+
+    rows = []
+    for multiplier in multipliers:
+        scaled = demand * multiplier
+        result = optimize_network(
+            localities, facilities, distances, mask, scaled, budget, **kwargs
+        )
+        summary = result.summary()
+        summary["multiplier"] = multiplier
+        summary["total_demand"] = round(result.total_demand)
+        summary["unserved"] = round(result.demand_unserved)
+        summary["sites"] = ",".join(sorted(result.opened_sites()["facility_key"]))
+        rows.append(summary)
+
+    columns = ["multiplier", "total_demand", "new_stores", "capex_cr",
+               "demand_served", "unserved", "coverage_pct", "avg_delivery_km",
+               "capacity_util_pct", "sites"]
+    return pd.DataFrame(rows)[columns].set_index("multiplier")
