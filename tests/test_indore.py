@@ -135,3 +135,30 @@ def test_zero_budget_changes_nothing(network):
     assert result.status == "Optimal"
     assert result.n_new_stores == 0
     assert result.capex_used == pytest.approx(0.0)
+
+
+def test_rounding_the_relaxation_is_not_a_substitute_for_the_milp(network):
+    """The LP relaxation scores within half a percent of the MILP, which makes
+    "solve the easy version and round it" look tempting. This test pins down
+    why it does not work here: rounding down or to nearest loses coverage
+    against the MILP, and rounding up breaks the budget. If a data change ever
+    made rounding competitive, this is where it would show up.
+    """
+    from src.optimizer import round_relaxation
+
+    localities, facilities, distances, mask, demand = network
+    table = round_relaxation(localities, facilities, distances, mask, demand, BUDGET)
+
+    milp = table.loc["MILP"]
+    assert milp["within_budget"]
+
+    for plan in ["LP, round down", "LP, round to nearest"]:
+        row = table.loc[plan]
+        assert row["within_budget"]
+        assert row["coverage_pct"] < milp["coverage_pct"], f"{plan} matched the MILP"
+
+    # Rounding up buys every partly-opened site, which the budget cannot cover.
+    assert not table.loc["LP, round up", "within_budget"]
+
+    # The relaxation really is fractional; otherwise the test proves nothing.
+    assert len(table.attrs["fractional_sites"]) > 0

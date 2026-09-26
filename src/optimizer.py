@@ -208,6 +208,14 @@ def optimize_network(
         "feasible_pairs": len(pairs),
         "objective_value": pulp.value(problem.objective) if status == "Optimal" else None,
         "relaxed": relax_binaries,
+        # Raw value of each open/closed variable, keyed by site. For the integer
+        # model these are all 0 or 1. For the relaxation they can be fractional
+        # -- "open 0.4 of this store" -- which is what makes it interesting to
+        # inspect, and what any round-the-relaxation shortcut has to deal with.
+        "open_values": {
+            str(facilities.loc[j, "facility_key"]): float(var.value() or 0.0)
+            for j, var in x.items()
+        } if status == "Optimal" else {},
     }
 
     if verbose:
@@ -357,3 +365,90 @@ def scenario_analysis(
                "demand_served", "unserved", "coverage_pct", "avg_delivery_km",
                "capacity_util_pct", "sites"]
     return pd.DataFrame(rows)[columns].set_index("multiplier")
+
+
+def solve_fixed_network(
+    localities: pd.DataFrame,
+    facilities: pd.DataFrame,
+    distances: np.ndarray,
+    mask: np.ndarray,
+    demand: np.ndarray,
+    open_keys: set[str],
+    **kwargs,
+) -> NetworkResult:
+    """Route demand optimally through a network whose stores are already chosen.
+
+    Useful for scoring a plan that came from somewhere other than the MILP --
+    a rounded LP relaxation, say -- on equal terms. The chosen candidate sites
+    are treated as already open and the rest are removed, so the solver has no
+    siting decision left to make and only works out the best routing.
+
+    The returned result carries the true capex of the chosen sites, not zero,
+    so it can be compared directly against the budget.
+    """
+    keep = (facilities["is_existing"] | facilities["facility_key"].isin(open_keys)).to_numpy()
+    fixed = facilities[keep].copy().reset_index(drop=True)
+    true_capex = fixed["capex"].copy()
+    fixed["is_existing"] = True
+    fixed["capex"] = 0.0
+
+    result = optimize_network(
+        localities, fixed, distances[:, keep], mask[:, keep], demand, budget=0.0, **kwargs
+    )
+
+    # Restore the real facility table so capex and "new store" counts are
+    # reported against what the plan would actually cost.
+    restored = fixed.copy()
+    restored["capex"] = true_capex
+    restored["is_existing"] = ~restored["facility_key"].isin(open_keys)
+    result.facilities = restored
+    result.method = "fixed"
+    return result
+
+
+def round_relaxation(
+    localities: pd.DataFrame,
+    facilities: pd.DataFrame,
+    distances: np.ndarray,
+    mask: np.ndarray,
+    demand: np.ndarray,
+    budget: float,
+    **kwargs,
+) -> pd.DataFrame:
+    """Solve the LP relaxation, round it three ways, and score each result.
+
+    Tests the tempting shortcut: if the relaxation scores within a fraction of
+    a percent of the integer optimum, why not solve the easy fractional
+    version and round it? Because a close objective says nothing about
+    whether a *rounded plan* is any good. The relaxation spreads spending
+    thinly across partly-opened sites, and every obvious rounding rule either
+    wastes budget or breaks it.
+    """
+    relaxed = optimize_network(localities, facilities, distances, mask, demand, budget,
+                               relax_binaries=True, **kwargs)
+    integer = optimize_network(localities, facilities, distances, mask, demand, budget, **kwargs)
+    values = relaxed.notes["open_values"]
+
+    plans = {
+        "MILP": set(integer.opened_sites()["facility_key"]),
+        "LP, round down": {k for k, v in values.items() if v >= 1 - 1e-6},
+        "LP, round to nearest": {k for k, v in values.items() if v >= 0.5},
+        "LP, round up": {k for k, v in values.items() if v > 1e-6},
+    }
+
+    rows = []
+    for name, keys in plans.items():
+        scored = solve_fixed_network(localities, facilities, distances, mask, demand, keys, **kwargs)
+        spend = float(facilities.loc[facilities["facility_key"].isin(keys), "capex"].sum())
+        rows.append({
+            "plan": name,
+            "new_stores": len(keys),
+            "capex_cr": round(spend / 1e7, 2),
+            "within_budget": spend <= budget + 1e-6,
+            "coverage_pct": round(scored.coverage_pct, 1),
+        })
+
+    fractional = {k: round(v, 3) for k, v in values.items() if 1e-6 < v < 1 - 1e-6}
+    table = pd.DataFrame(rows).set_index("plan")
+    table.attrs["fractional_sites"] = fractional
+    return table

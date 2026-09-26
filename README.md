@@ -1,175 +1,173 @@
 # Blinkit dark-store network optimizer
 
-Where should a quick-commerce operator open its next dark stores in a city, given a fixed capital budget?
-Blinkit ran 2,443 dark stores as of June 2026 and keeps adding more at roughly ₹2.5 crore of capex each, so
-store placement is a capital allocation decision made under three simultaneous limits: the budget, a delivery
-radius the ten-minute promise cannot survive breaking, and a ceiling on how many orders one store can pick and
-pack in a day. This project models that decision for Indore as a **capacitated facility location problem**,
-solves it as a mixed-integer linear program with PuLP and CBC, and measures the result against the greedy
-heuristic most teams would use informally. The comparison is the point — an optimizer with no benchmark
-produces a number nobody can judge.
-
----
+Blinkit had 2,443 dark stores in June 2026 and still opens more every quarter, at about ₹2.5 crore of capex per
+store. At that price, deciding where the next store goes is really a capital allocation problem. In this
+project I model that decision for one city, Indore: given a fixed budget, which candidate sites should be
+opened so that as many orders as possible get delivered? Three limits apply at once. The budget is fixed, a
+store can only serve customers within the radius that keeps delivery at ten minutes, and each store can only
+pick and pack a certain number of orders a day. I formulate this as a capacitated facility location problem,
+solve it as a mixed-integer linear program (MILP) with PuLP and the CBC solver, and compare the result with a
+greedy heuristic, which is roughly how a team would make the decision without a model. Without that
+comparison there would be no way to tell whether the optimizer's answer is actually any good.
 
 ## What's real
 
-These figures come from Eternal's public reporting and are used to calibrate the model. Nothing here is
-extended beyond what was actually disclosed.
+The following figures come from Eternal's public disclosures. I use them to calibrate the synthetic data and
+nowhere claim more than they state.
 
-| Fact | Value | Source |
+| Figure | Value | Source |
 |---|---|---|
 | Blinkit store count | 2,443 | Eternal Q1 FY27 (June 2026) |
 | Capex per store, including warehousing | ~₹2.5 crore | Eternal, long-run assumption |
 | Steady-state NOV per store per day | ~₹11 lakh | Eternal, steady-state target |
-| Network working capital | ~12 days | Eternal |
+| Net working capital | ~12 days | Eternal |
 | Target pre-tax ROCE | ~41.7% | Eternal, under the above assumptions |
 | Network footprint | ~19 million sq ft across 300+ cities | Eternal |
 | Inventory and spoilage loss | ~1.8% of NOV, "fairly asymptotic" | Eternal |
-| Peer average delivery distance | ~1.7–1.8 km, FY26 | Zepto disclosure |
+| Average delivery distance of a peer | ~1.7–1.8 km, FY26 | Zepto disclosure |
 
 ## What's synthetic
 
-Everything below was invented for this project. **No real Blinkit order, rent, store-location or dispatch
-data was used** — none is public at this granularity.
+Everything else was generated for this project. No real Blinkit order, rent, location or dispatch data was
+used, and none is publicly available at this level of detail.
 
-| Assumption | Value | Reasoning |
+| Assumption | Value | Reason |
 |---|---|---|
-| City | Indore | Tier-2, thin quick-commerce presence, so expansion is a real question |
+| City | Indore | Tier-2 city with a thin quick-commerce presence, so expanding there is an open question |
 | Localities | 35, real names, approximate coordinates | Enough spatial structure to matter, small enough to solve in seconds |
-| Demand history | 90 days, 1 Sep – 29 Nov 2025 | Contains Diwali (20 Oct 2025), so the festive peak is real rather than invented |
-| Candidate sites | 50 | — |
-| Existing stores | 6 | Makes the decision incremental, matching the real situation |
-| Average order value | ~₹560 blended, varying by income tier | Assumed; drives the capacity derivation |
-| Store capacity | ~1,200–2,400 orders/day | **Derived**, see below |
-| Delivery radius | 2.5 km | Assumed, anchored on the ~1.7–1.8 km peer average |
-| Budget | ₹20 crore | Assumed — roughly eight stores at the disclosed capex |
+| Demand history | 90 days, 1 Sep to 29 Nov 2025 | Includes Diwali (20 Oct 2025), so the festive peak sits on a real date |
+| Candidate sites | 50 | |
+| Existing stores | 6 | Makes the decision incremental, as it is for Blinkit |
+| Average order value | ~₹560 overall, varying by income tier | Assumed; the capacity estimate depends on it |
+| Store capacity | ~1,200 to 2,400 orders per day | Derived, see below |
+| Delivery radius | 2.5 km | Assumed, set a little above the 1.7–1.8 km peer average |
+| Budget | ₹20 crore | Assumed, enough for about eight stores at the disclosed capex |
 
-Demand is generated with spatial structure rather than drawn independently: density peaks around four real
-focal points (Rajwada, Palasia, Vijay Nagar, Bhawarkuan) and decays with distance, so neighbouring localities
-resemble each other. Affluence is generated as a separate field with its own centres, because the densest
-areas of a real city are not the wealthiest. Order counts are Poisson, with a weekly cycle and a festive
-window around Diwali. The generator asserts at the end that its aggregates land near the disclosed figures.
+Demand is not drawn independently for each locality. Population density peaks around four real centres
+(Rajwada, Palasia, Vijay Nagar and Bhawarkuan) and falls off with distance from them, so neighbouring areas
+look alike, as they do in a real city. Affluence is generated separately, since the densest parts of a city are
+rarely its richest. Daily order counts are Poisson distributed, with a weekly cycle and a festive spike around
+Diwali. At the end of the run, the generator checks that its totals land close to the disclosed figures and
+stops with an error if they don't.
 
-### One derivation worth stating explicitly
+### Where the capacity figure comes from
 
-Store capacity is not disclosed anywhere. It is derived:
+Store capacity is not disclosed, so I derived it:
 
 ```
 ₹11,00,000 NOV per store per day  ÷  ~₹600 average order value  ≈  1,800 orders per store per day
 ```
 
-The ₹11 lakh is disclosed. The ₹600 is an assumption. **So 1,800 is not a fact** — it inherits the weakest
-link in its chain, and it moves substantially with the assumption (₹500 → ~2,200; ₹700 → ~1,570). Site
-capacities in the data are spread across 1,200–2,400 rather than fixed at a spuriously precise 1,800.
-
----
+The ₹11 lakh comes from Eternal, but the ₹600 is my own assumption, so 1,800 is only as good as that
+assumption. At ₹500 per order the same calculation gives about 2,200, and at ₹700 about 1,570. For that
+reason the site capacities in the data are spread between 1,200 and 2,400 instead of all being set to 1,800.
 
 ## How to run
 
-Requires Python 3.11+. MySQL is optional.
+You need Python 3.11 or later. MySQL is optional.
 
 ```bash
+python -m venv .venv
+.venv\Scripts\activate           # on macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env        # optional — see below
-python generate_data.py     # builds and populates the database
-python -m pytest            # 20 tests
-jupyter lab notebook.ipynb  # the analysis
+python generate_data.py          # builds and fills the database
+python -m pytest                 # 25 tests
+jupyter lab notebook.ipynb
 ```
 
-**Database.** The project runs on SQLite with no setup at all — leave `DATABASE_URL` unset and
-`generate_data.py` creates `data/blinkit_sim.db` for you. To use MySQL 8 instead, set it in `.env`:
+With `DATABASE_URL` unset, everything runs on SQLite and `generate_data.py` creates `data/blinkit_sim.db`
+itself. To use MySQL 8, copy `.env.example` to `.env` and set:
 
 ```
 DATABASE_URL=mysql+pymysql://user:password@localhost:3306/blinkit_sim
 ```
 
-The database is created automatically if it does not exist. The five analytical queries are written to run
-unchanged on both engines; the single place the dialects diverge — day-of-week extraction — is isolated in
-`src/db.py`.
-
-`.env` is gitignored and must never be committed.
-
-### Layout
+The database is created if it doesn't exist. It should be a dedicated one: the schema rebuild drops the
+project's own tables, so the script checks the target first and refuses to run if it finds any table the
+project didn't create. The five analysis queries run unchanged on both MySQL and SQLite. The one place the two
+dialects disagree, extracting the day of the week, is handled in `src/db.py`. Keep `.env` out of git; it is
+already in `.gitignore`.
 
 ```
-generate_data.py          builds and populates the database
-notebook.ipynb            the analysis
-sql/
-  schema_mysql.sql        schema, MySQL 8
-  schema_sqlite.sql       schema, SQLite
-  queries/                the five analytical queries
-src/
-  db.py                   engine, dialect shim, schema loading
-  geo.py                  haversine distance, feasibility mask
-  evaluate.py             shared metrics, dispatch rule
-  baseline.py             greedy heuristic
-  optimizer.py            the MILP, sensitivity, scenarios
-  forecast.py             ridge demand forecast
-  plots.py                figures
-tests/                    20 tests, including a hand-checkable toy MILP
+generate_data.py      builds and fills the database
+notebook.ipynb        the analysis
+sql/                  MySQL and SQLite schemas, plus the five analysis queries
+src/db.py             connection, dialect handling, schema rebuild and its safety check
+src/geo.py            haversine distances, the delivery-radius mask
+src/evaluate.py       shared metrics and the dispatch rule
+src/baseline.py       greedy heuristic
+src/optimizer.py      the MILP, sensitivity sweep, festive scenarios
+src/forecast.py       ridge regression demand forecast
+src/plots.py          figures
+tests/                25 tests, including a toy problem small enough to solve by hand
 ```
-
----
 
 ## Results
 
-Against a greedy baseline that respects every constraint the optimizer does — budget, capacity, radius and
-the incumbent network — the MILP **opened 9 stores for ₹19.97 crore and served 75.8% of demand, against
-greedy's 6 stores, ₹18.96 crore and 69.5%**: about **2,200 additional orders per day for the same capital**.
+The greedy baseline follows the same rules as the optimizer: the same budget, capacities, radius and existing
+stores. With ₹20 crore, greedy opened 6 stores for ₹18.96 crore and served 69.5% of demand. The MILP opened 9
+stores for ₹19.97 crore and served 75.8%, which is about 2,200 more orders a day from the same budget.
 
-The mechanism is worth more than the number. Both networks run at 100% capacity utilisation, so coverage is
-decided entirely by how much throughput the budget buys. Greedy took the individually-largest sites — ₹2.84 to
-₹3.50 crore each — and stranded ₹1.04 crore it could not spend. The optimizer bought nine cheaper sites at
-₹1.84 to ₹2.52 crore, more total capacity for the same money: 796 orders per crore against greedy's 722.
-Greedy could not find this, because evaluating "which *combination* of sites buys the most capacity" is
-precisely what a one-site-at-a-time heuristic cannot do.
+The optimizer did not win by choosing better locations. In both plans every store runs at full capacity,
+because there is more demand in the city than the budget can buy capacity for. Coverage therefore depends only
+on how much capacity the money buys. Greedy always picked the site that added the most orders on its own,
+which usually meant the largest and most expensive one (₹2.8 to ₹3.5 crore). After six of those it was left
+with ₹1.04 crore, too little for another site. The MILP chose nine cheaper sites (₹1.8 to ₹2.5 crore) that
+together gave more capacity: 796 orders a day per crore spent, against 722 for greedy. Greedy can't find a plan
+like that, because it looks at one site at a time and never compares combinations.
 
-Three further results:
+I tested the result in four ways.
 
-**The recommendation is stable.** Sweeping the capital weight λ₁ from 0 to 600 orders per crore leaves the
-answer unchanged at nine stores. It first moves at 720 — which is exactly where the analytical break-even sits
-for a ₹2.5 crore store serving ~1,800 orders/day — and capital stops being deployed by 900.
+**Sensitivity to the capex weight.** The model has a weight, λ₁, for how many orders a day one crore of
+capital must bring in to be worth spending. Anywhere from 0 to 600, the answer stays the same nine stores. It
+first changes at 720, which matches the break-even I worked out beforehand for a ₹2.5 crore store serving about
+1,800 orders a day. Above about 900, spending never looks worthwhile, and the model opens nothing.
 
-**Festive demand cannot be bought away.** At 1.5×, 2× and 2.5× demand the plan does not change and demand
-served does not move, because capacity is bought with capital and capital is fixed. Coverage falls from 75.8%
-to 30.3%. The binding constraint flips from budget to capacity, which is an argument for temporary capacity
-rather than permanent footprint.
+**Rounding the LP relaxation.** The LP relaxation is the same problem with stores allowed to open partially.
+Its objective came within 0.5% of the MILP's, which suggests solving that easier version and rounding it
+might have been enough. It isn't. The relaxation opens thirteen sites, seven of them only partly. Rounding
+down gives 61.1% coverage, which is worse than greedy. Rounding to the nearest whole store gives 72.4%.
+Rounding up gives 96.2%, but costs ₹30.95 crore, well over budget. A good plan that uses whole stores and
+stays within budget only comes out of the MILP.
 
-**Better forecasting does not change the decision.** A ridge regression beats a seasonal-naive benchmark by
-27% on mean absolute error, and re-running the optimizer on forecast demand selects *identical* sites. That is
-a negative result and a useful one: the recommendation is robust to demand-estimate accuracy, so effort spent
-improving the forecast would not have moved it.
+**Festive demand.** At 1.5, 2 and 2.5 times normal demand, the plan and the number of orders served stay the
+same. Once every store is full, moving the same money around can't add capacity, and coverage falls to 30.3%
+at 2.5 times demand. Permanent stores built for the peak would stand mostly idle the rest of the year, so
+Diwali is better handled with temporary capacity, such as extra staff, overflow space and stock placed ahead
+of time.
 
----
+**Forecast demand.** A ridge regression forecast beats a seasonal-naive baseline by 27% on mean absolute
+error. Running the optimizer on the forecast instead of historical averages picks exactly the same nine sites.
+The recommendation holds, and a better forecast would not have changed it.
 
 ## Limitations
 
-The method is the contribution; the numbers are illustrative.
+**The data is synthetic.** Totals are calibrated to disclosed figures, but everything at locality level is
+invented. The results show how the method behaves on plausible data. They say nothing about Indore itself.
 
-**The data is synthetic.** Demand is calibrated so aggregates land near disclosed figures, but locality-level
-variation is invented. Every conclusion is a statement about the method applied to plausible data, not about
-Indore.
+**The model counts orders, not their value.** A ₹420 order and a ₹720 order count the same, so the optimizer
+will give up high-value customers if it can get more orders elsewhere. That is what happened here. High-income
+localities went from 100% service under greedy to 84.7%, Vijay Nagar lost service completely, and mid-income
+areas went from 40.4% to 77.5%. Daily revenue still rose, from ₹157.6 to ₹166.7 lakh, but only because the
+extra orders outweighed the smaller baskets. The next version will weight each locality by order value and
+customer loyalty.
 
-**Distances are centroid-to-store and understate reality.** Each locality collapses to one point, so the model
-reports ~0.63 km average delivery against a disclosed peer average of ~1.7–1.8 km. Real distance includes
-travel within the locality and follows roads, not great circles. A road-network distance matrix would raise
-every distance and shrink the feasible set.
+**Operating costs are left out.** The model accounts for setup capex only. Staff, power and rent are ignored,
+even though the site data includes rent. Nine stores need more store staff than six, so the optimizer's
+advantage is somewhat smaller than it looks. Rider costs grow with orders rather than stores, and nearer stores
+shorten trips: average delivery distance fell from 0.71 to 0.63 km.
 
-**Capacity is a single daily figure.** Real stores have hourly peaks, and a store comfortable with 1,800
-orders spread across a day may fail at the evening concentration.
+**Distances are measured from locality centroids.** Each locality is treated as a single point, so the model
+reports an average delivery distance of about 0.63 km. The disclosed peer average is 1.7 to 1.8 km, because
+real deliveries follow roads and start from doorsteps, not from the middle of a neighbourhood. Using road
+distances would make every trip longer and put fewer localities within range of each site.
 
-**λ₁ and λ₂ are judgment calls.** The sensitivity analysis shows the recommendation holds across a wide band,
-but the weights encode a preference about capital versus coverage that belongs to a finance team.
+**Capacity is a daily total.** In reality orders bunch up in the evening, and a store that can handle 1,800
+orders spread over a day may still fall behind at 7 pm.
 
-**Cannibalisation is modelled only through capacity.** Opening near an existing store shifts demand between
-them but does not reduce total demand — no substitution effect, and no competitive response, which in a real
-market would be the first-order consequence of a visible expansion.
+**Competition and cannibalisation are not modelled.** Opening a store near an existing one only moves demand
+between them. Customers don't switch to a competitor, and competitors don't react to a visible expansion.
 
-**Spoilage is excluded.** Inventory loss runs ~1.8% of NOV. It is a real operating cost and would tighten the
-economics of marginal sites, but it does not vary enough between sites to change their ranking.
-
-**The equity trade-off is unaddressed.** The optimum leaves three localities with zero service rather than
-spreading partial service everywhere. That is optimal against this objective and may be wrong against the
-business's actual preferences; a minimum-coverage-per-locality constraint would express the alternative, at a
-cost in total coverage.
+**Spoilage is left out.** Inventory loss is about 1.8% of NOV and is a real cost. It varies little from one
+site to another, though, so it would not change which sites come out on top.
