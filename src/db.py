@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine, make_url
 
 # Project root: this file is at <root>/src/db.py
@@ -138,13 +138,61 @@ def _split_statements(script: str) -> list[str]:
     return [stmt.strip() for stmt in no_comments.split(";") if stmt.strip()]
 
 
+# The only tables this project ever creates. The schema rebuild is allowed to
+# touch these and nothing else.
+PROJECT_TABLES = frozenset({"localities", "demand", "candidate_sites", "existing_stores"})
+
+
+class ForeignTablesError(RuntimeError):
+    """Raised when the target database holds tables this project did not create."""
+
+
+def check_database_is_ours(engine: Engine) -> None:
+    """Refuse to continue if the target database holds anything but our tables.
+
+    The rebuild drops tables called `localities` and `demand` -- generic enough
+    names that some unrelated application could easily have its own. On MySQL
+    it also switches foreign key checks off first, removing the one safeguard
+    that might otherwise have blocked the drop. So if DATABASE_URL ever points
+    at the wrong database, through a typo or a URL copied from another project,
+    the rebuild would silently destroy someone else's data.
+
+    This check runs before anything is dropped. An empty database, or one
+    holding only this project's four tables, passes -- so first runs and
+    re-runs both work. Anything else stops the run with nothing touched.
+
+    Engine-internal tables are ignored: SQLite creates `sqlite_sequence` on its
+    own to track AUTOINCREMENT counters, and it is not user data.
+    """
+    existing = {
+        name for name in inspect(engine).get_table_names()
+        if not name.startswith("sqlite_")
+    }
+    foreign = sorted(existing - PROJECT_TABLES)
+    if foreign:
+        raise ForeignTablesError(
+            f"Refusing to rebuild the schema: the target database "
+            f"({describe_connection(engine)}) contains tables this project did "
+            f"not create: {', '.join(foreign)}.\n"
+            f"Rebuilding would drop any table named "
+            f"{', '.join(sorted(PROJECT_TABLES))} in it. Point DATABASE_URL at a "
+            f"dedicated, empty database -- for example one created with\n"
+            f"    CREATE DATABASE blinkit_sim CHARACTER SET utf8mb4 "
+            f"COLLATE utf8mb4_unicode_ci;"
+        )
+
+
 def apply_schema(engine: Engine) -> None:
     """Drop and recreate every table. Destructive by design.
 
     This is a synthetic dataset that is meant to be rebuilt from scratch with
     one command, so a clean slate each run is the correct behaviour. It would
-    NOT be correct against a database holding real data.
+    NOT be correct against a database holding real data -- which is why
+    check_database_is_ours() runs first and refuses to proceed if the database
+    holds anything the project did not put there.
     """
+    check_database_is_ours(engine)
+
     script = schema_path(engine).read_text(encoding="utf-8")
     statements = _split_statements(script)
 
