@@ -30,6 +30,11 @@ CREATE TABLE localities (
     population_density        DECIMAL(10,2)  NOT NULL,  -- people per sq km
     avg_household_income_tier VARCHAR(4)     NOT NULL,  -- 'low' | 'mid' | 'high'
 
+    -- Loyalty: the share of this locality's customers who order again within
+    -- 90 days. Synthetic, like everything else here -- no real retention data
+    -- is public. DECIMAL(4,3) holds 0.000 to 9.999; the CHECK keeps it a share.
+    repeat_rate_90d           DECIMAL(4,3)   NOT NULL,
+
     PRIMARY KEY (locality_id),
 
     -- Two localities with the same name would be a data-generation bug, and the
@@ -40,6 +45,8 @@ CREATE TABLE localities (
         CHECK (avg_household_income_tier IN ('low', 'mid', 'high')),
     CONSTRAINT chk_localities_density
         CHECK (population_density > 0),
+    CONSTRAINT chk_localities_repeat
+        CHECK (repeat_rate_90d BETWEEN 0 AND 1),
     CONSTRAINT chk_localities_lat  CHECK (latitude  BETWEEN -90  AND 90),
     CONSTRAINT chk_localities_lon  CHECK (longitude BETWEEN -180 AND 180)
 ) ENGINE=InnoDB;

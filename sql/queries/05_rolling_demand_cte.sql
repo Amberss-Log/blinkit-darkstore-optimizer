@@ -76,6 +76,7 @@ SELECT
     l.longitude,
     l.avg_household_income_tier,
     l.population_density,
+    l.repeat_rate_90d,
     ROUND(AVG(s.rolling_7d_orders), 1) AS smoothed_orders_per_day,
     ROUND(AVG(s.avg_order_value), 2)   AS avg_order_value,
     COUNT(*)                           AS days_used
@@ -88,6 +89,7 @@ GROUP BY
     l.latitude,
     l.longitude,
     l.avg_household_income_tier,
-    l.population_density
+    l.population_density,
+    l.repeat_rate_90d
 ORDER BY
     smoothed_orders_per_day DESC;

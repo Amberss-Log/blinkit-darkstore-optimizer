@@ -86,8 +86,8 @@ def test_rebuild_over_our_own_tables_is_allowed(engine):
     with engine.begin() as conn:
         conn.execute(text(
             "INSERT INTO localities (locality_name, latitude, longitude, "
-            "population_density, avg_household_income_tier) "
-            "VALUES ('Palasia', 22.72, 75.88, 25000, 'high')"
+            "population_density, avg_household_income_tier, repeat_rate_90d) "
+            "VALUES ('Palasia', 22.72, 75.88, 25000, 'high', 0.69)"
         ))
 
     # Confirm the internal table really exists, so this test is exercising the

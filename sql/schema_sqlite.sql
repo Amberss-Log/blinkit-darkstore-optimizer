@@ -30,9 +30,11 @@ CREATE TABLE localities (
     longitude                 DECIMAL(9,6)  NOT NULL,
     population_density        DECIMAL(10,2) NOT NULL,
     avg_household_income_tier VARCHAR(4)    NOT NULL,
+    repeat_rate_90d           DECIMAL(4,3)  NOT NULL,  -- loyalty, synthetic
 
     CHECK (avg_household_income_tier IN ('low', 'mid', 'high')),
     CHECK (population_density > 0),
+    CHECK (repeat_rate_90d BETWEEN 0 AND 1),
     CHECK (latitude  BETWEEN -90  AND 90),
     CHECK (longitude BETWEEN -180 AND 180)
 );

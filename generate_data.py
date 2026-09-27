@@ -277,7 +277,13 @@ def build_candidate_sites(
 
         # Rent tracks density and affluence, independent of capex.
         tier_rent = {"low": 0.85, "mid": 1.00, "high": 1.35}[loc["avg_household_income_tier"]]
-        rent = 55.0 * float(loc["population_density"]) ** 0.55 * tier_rent
+        # Scaled so the median site rents for about Rs 1.6 lakh a month -- a
+        # plausible figure for a 3,000-4,000 sq ft dark store in a Tier-2 city,
+        # and an assumption like everything else here. An earlier version used a
+        # constant about thirteen times too small, which pushed every site below
+        # the floor and gave all fifty an identical rent. It went unnoticed while
+        # rent was unused; it matters once running costs enter the model.
+        rent = 710.0 * float(loc["population_density"]) ** 0.55 * tier_rent
         rent = float(rent * rng.normal(1.0, 0.12))
 
         rows.append(
@@ -286,7 +292,7 @@ def build_candidate_sites(
                 "locality_id": int(locality_id),
                 "latitude": round(lat, 6),
                 "longitude": round(lon, 6),
-                "estimated_rent_monthly": round(max(rent, 25_000.0), 2),
+                "estimated_rent_monthly": round(max(rent, 40_000.0), 2),
                 "max_capacity_orders_per_day": capacity,
                 "setup_capex": round(capex, 2),
             }
@@ -329,6 +335,34 @@ def build_existing_stores(
 # ---------------------------------------------------------------------------
 # Sanity checks
 # ---------------------------------------------------------------------------
+def add_loyalty(localities: pd.DataFrame) -> pd.DataFrame:
+    """Give each locality a 90-day repeat rate: the share of its customers who
+    order again within 90 days.
+
+    This is the loyalty measure the value-weighted model uses, and it is an
+    assumption. No retention data is public at locality level. The shape is
+    what quick commerce commonly reports in general terms -- habitual use rises
+    with income, because richer households are likelier to have made ten-minute
+    delivery a routine rather than an occasional convenience -- with enough
+    noise that two localities in the same tier do not come out identical.
+
+    It deliberately uses its OWN random generator, seeded separately and drawn
+    only after every other table has been built. Pulling these numbers from the
+    main generator would shift every random draw that followed, and the demand,
+    sites and stores -- and every result already reported from them -- would
+    silently change. Isolating the stream keeps the existing data byte-for-byte
+    identical and only adds the new column.
+    """
+    loyalty_rng = np.random.default_rng(SEED + 7_919)
+    base = {"low": 0.50, "mid": 0.62, "high": 0.74}
+
+    out = localities.copy()
+    noise = loyalty_rng.normal(0.0, 0.05, size=len(out))
+    rates = out["avg_household_income_tier"].map(base).to_numpy() + noise
+    out["repeat_rate_90d"] = np.round(np.clip(rates, 0.30, 0.90), 3)
+    return out
+
+
 def sanity_check(demand: pd.DataFrame, sites: pd.DataFrame) -> None:
     """Verify the synthetic data lands near the disclosed figures.
 
@@ -377,7 +411,7 @@ def main() -> None:
 
     apply_schema(engine)
 
-    localities_out = localities.drop(columns=["_affluence"])
+    localities_out = add_loyalty(localities.drop(columns=["_affluence"]))
     with engine.begin() as conn:
         localities_out.to_sql("localities", conn, if_exists="append", index=False)
         demand.to_sql("demand", conn, if_exists="append", index=False, chunksize=1_000)
