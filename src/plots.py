@@ -232,3 +232,37 @@ def plot_scenarios(scenarios: pd.DataFrame):
 
     fig.tight_layout()
     return fig
+
+
+def plot_margin_sweep(sweep: pd.DataFrame, derived_margin_pct: float | None = None):
+    """Yearly profit of each plan as the assumed margin changes.
+
+    The margin is the least certain input in the money model, so the figure
+    that matters is whether the ranking of plans survives it moving. Lines
+    that cross would mean the recommendation depends on a number nobody has.
+    """
+    fig, ax = plt.subplots(figsize=(9, 4.8))
+    styles = {
+        "greedy, orders": dict(color=C_GREEDY, linestyle="--", marker="o"),
+        "MILP, orders": dict(color=C_EXISTING, linestyle="--", marker="s"),
+        "greedy, profit": dict(color=C_GREEDY, linestyle="-", marker="o"),
+        "MILP, profit": dict(color=C_MILP, linestyle="-", marker="D", linewidth=2.4),
+        "MILP, loyalty": dict(color="#8e6fbf", linestyle="-", marker="^"),
+    }
+    for column in sweep.columns:
+        ax.plot(sweep.index, sweep[column], label=column, **styles.get(column, {}))
+
+    if derived_margin_pct is not None:
+        ax.axvline(derived_margin_pct, color="#888", linestyle=":", linewidth=1)
+        ax.annotate(f"derived margin {derived_margin_pct:.2f}%",
+                    xy=(derived_margin_pct, ax.get_ylim()[1]), xytext=(4, -14),
+                    textcoords="offset points", fontsize=8, color="#555")
+
+    ax.set_xlabel("assumed contribution margin (% of NOV)")
+    ax.set_ylabel("profit from the new stores (Rs crore a year)")
+    ax.set_title("Profit by plan across margins")
+    ax.grid(alpha=0.2)
+    ax.set_axisbelow(True)
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    return fig

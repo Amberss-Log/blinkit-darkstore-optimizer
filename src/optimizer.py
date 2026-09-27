@@ -56,8 +56,16 @@ def optimize_network(
     max_new_stores: int | None = None,
     relax_binaries: bool = False,
     verbose: bool = False,
+    value_weights: np.ndarray | None = None,
+    running_cost: np.ndarray | None = None,
 ) -> NetworkResult:
     """Choose which sites to open and how to route demand, optimally.
+
+    value_weights says how much one order from each locality is worth relative
+    to an average order (see src/economics.py). Left as None, every order counts
+    as 1, which is the original model. running_cost is each facility's daily
+    rent and staff cost converted into orders; left as None, stores cost nothing
+    to run once open. Both defaults reproduce the first version exactly.
 
     Set relax_binaries to solve the LP relaxation instead -- the same model with
     the open/closed decisions allowed to take fractional values. That solution
@@ -137,18 +145,30 @@ def optimize_network(
     # total demand is a constant, so maximising served is algebraically the
     # same as minimising unserved. A separate penalty would only rescale the
     # other two terms while appearing to add a degree of freedom.
-    served_total = pulp.lpSum(s.values())
+    #
+    # Two optional terms extend this. With value weights, an order counts for
+    # its locality's weight instead of 1, so a big basket from a loyal area is
+    # worth more than a small one from a fickle area. The distance term stays
+    # unweighted: a kilometre of delivery costs the same whatever is in the bag.
+    # With running costs, every candidate store that opens pays its daily rent
+    # and staff, expressed in orders so it sits in the same units as the rest.
+    weights = np.ones(n_loc) if value_weights is None else np.asarray(value_weights, dtype=float)
+    fixed = np.zeros(n_fac) if running_cost is None else np.asarray(running_cost, dtype=float)
+
+    served_total = pulp.lpSum(weights[i] * s[(i, j)] for (i, j) in pairs)
     capex_total = pulp.lpSum(
         (capex[j] / CRORE) * x[j] for j in x
     )
     distance_total = pulp.lpSum(
         distances[i, j] * s[(i, j)] for (i, j) in pairs
     )
+    running_total = pulp.lpSum(fixed[j] * x[j] for j in x if fixed[j])
 
     problem += (
         served_total
         - lambda_capex * capex_total
         - lambda_distance * distance_total
+        - running_total
     ), "net_value"
 
     # -- constraints --------------------------------------------------------
@@ -208,6 +228,8 @@ def optimize_network(
         "feasible_pairs": len(pairs),
         "objective_value": pulp.value(problem.objective) if status == "Optimal" else None,
         "relaxed": relax_binaries,
+        "value_weighted": value_weights is not None,
+        "running_costs": running_cost is not None,
         # Raw value of each open/closed variable, keyed by site. For the integer
         # model these are all 0 or 1. For the relaxation they can be fractional
         # -- "open 0.4 of this store" -- which is what makes it interesting to
@@ -294,6 +316,7 @@ def sensitivity_sweep(
     budget: float,
     lambda_values: list[float],
     lambda_distance: float = LAMBDA_DISTANCE,
+    **kwargs,
 ) -> pd.DataFrame:
     """Re-solve across a range of capital weights.
 
@@ -307,7 +330,7 @@ def sensitivity_sweep(
     for lam in lambda_values:
         result = optimize_network(
             localities, facilities, distances, mask, demand, budget,
-            lambda_capex=lam, lambda_distance=lambda_distance,
+            lambda_capex=lam, lambda_distance=lambda_distance, **kwargs,
         )
         summary = result.summary()
         summary["lambda_capex"] = lam
@@ -386,6 +409,10 @@ def solve_fixed_network(
     The returned result carries the true capex of the chosen sites, not zero,
     so it can be compared directly against the budget.
     """
+    # Every site is fixed here, so there is no open/close decision for a
+    # running cost to influence. The per-facility array would also no longer
+    # line up once unused sites are dropped, so it is discarded.
+    kwargs.pop("running_cost", None)
     keep = (facilities["is_existing"] | facilities["facility_key"].isin(open_keys)).to_numpy()
     fixed = facilities[keep].copy().reset_index(drop=True)
     true_capex = fixed["capex"].copy()

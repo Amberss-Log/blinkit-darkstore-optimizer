@@ -33,6 +33,8 @@ def greedy_network(
     budget: float,
     max_new_stores: int | None = None,
     verbose: bool = False,
+    value_weights: np.ndarray | None = None,
+    running_cost: np.ndarray | None = None,
 ) -> NetworkResult:
     """Open stores one at a time, always taking the biggest immediate gain.
 
@@ -55,8 +57,21 @@ def greedy_network(
     evaluate the pair, because it only ever evaluates one site at a time. This
     is the knapsack trap, and it is the specific failure the optimizer exists to
     avoid.
+
+    value_weights and running_cost work exactly as they do in the optimizer,
+    so the two are always judged against the same objective. With both set, a
+    site's gain is the value of the extra orders it serves minus what it costs
+    to run, and a site that would not cover its own running costs is never
+    opened. Left as None, the behaviour is the original order-counting greedy.
     """
     start = time.perf_counter()
+    n_loc, n_fac = distances.shape
+    weights = np.ones(n_loc) if value_weights is None else np.asarray(value_weights, dtype=float)
+    fixed = np.zeros(n_fac) if running_cost is None else np.asarray(running_cost, dtype=float)
+
+    def value_of(alloc):
+        """Weighted orders served by an allocation."""
+        return float((alloc.sum(axis=1) * weights).sum())
 
     capacity = facilities["capacity"].to_numpy(dtype=float)
     capex = facilities["capex"].to_numpy(dtype=float)
@@ -66,6 +81,7 @@ def greedy_network(
     open_flags = is_existing.copy()
     assignment = nearest_first_allocation(demand, capacity, distances, mask, open_flags)
     served = assignment.sum()
+    value = value_of(assignment)
 
     remaining_budget = float(budget)
     opened_order: list[str] = []
@@ -92,7 +108,7 @@ def greedy_network(
             trial_assignment = nearest_first_allocation(
                 demand, capacity, distances, mask, trial_flags
             )
-            gain = trial_assignment.sum() - served
+            gain = value_of(trial_assignment) - value - fixed[j]
 
             if gain > best_gain + 1e-9:
                 best_gain = gain
@@ -104,14 +120,16 @@ def greedy_network(
 
         open_flags[best_idx] = True
         assignment = best_assignment
-        served += best_gain
+        gained_orders = best_assignment.sum() - served
+        served = best_assignment.sum()
+        value = value_of(best_assignment)
         remaining_budget -= capex[best_idx]
         opened_order.append(str(facilities.loc[best_idx, "facility_key"]))
 
         if verbose:
             print(f"  open {facilities.loc[best_idx, 'facility_key']:>5}  "
                   f"capex Rs {capex[best_idx] / 1e7:.2f} cr  "
-                  f"+{best_gain:,.0f} orders  "
+                  f"+{gained_orders:,.0f} orders  "
                   f"budget left Rs {remaining_budget / 1e7:.2f} cr")
 
     return NetworkResult(

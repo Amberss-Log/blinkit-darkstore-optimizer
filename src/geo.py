@@ -65,6 +65,11 @@ def build_facilities(
             "longitude": existing_stores["longitude"].astype(float),
             "capacity": existing_stores["max_capacity_orders_per_day"].astype(float),
             "capex": 0.0,
+            # Existing stores do pay rent, but they stay open under every plan,
+            # so their running cost is the same constant whichever sites are
+            # chosen. Constants cannot change a decision, so it is left at zero
+            # rather than carried through the model for nothing.
+            "rent_monthly": 0.0,
             "is_existing": True,
         }
     )
@@ -78,6 +83,7 @@ def build_facilities(
             "longitude": candidate_sites["longitude"].astype(float),
             "capacity": candidate_sites["max_capacity_orders_per_day"].astype(float),
             "capex": candidate_sites["setup_capex"].astype(float),
+            "rent_monthly": candidate_sites["estimated_rent_monthly"].astype(float),
             "is_existing": False,
         }
     )
