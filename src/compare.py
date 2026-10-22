@@ -13,7 +13,7 @@ import pandas as pd
 
 from src import economics as ec
 from src.baseline import greedy_network
-from src.optimizer import optimize_network
+from src.optimizer import optimize_network, solve_fixed_network
 
 
 def profit_settings(localities, facilities, demand, econ) -> dict:
@@ -134,3 +134,69 @@ def margin_sweep(localities, facilities, distances, mask, demand, budget, margin
     table = pd.DataFrame(rows).T
     table.index.name = "margin_pct"
     return table
+
+
+def capex_sweep(localities, facilities, distances, mask, demand, budgets_cr, econ,
+                festive_multiplier: float = 2.5, festive_days: int = 8) -> pd.DataFrame:
+    """Raise the budget, plan for normal days, then hit the same stores with festive demand.
+
+    This answers "why not just spend more?". Each network is planned on NORMAL
+    demand at a fixed budget, under both the orders model and the profit model,
+    and then frozen. The same stores are then run at festive_multiplier times
+    demand, the way a real network meets Diwali with whatever it built.
+
+    Three things come out. Whether a bigger budget leaves stores with spare room
+    on normal days (it does not: neither model builds a store that would sit
+    idle). Where extra money stops buying anything. And how much of a festive
+    rush a network sized for normal days can absorb, which is roughly its
+    normal coverage divided by the multiplier once every store is full.
+
+    Yearly profit counts festive_days days at the full multiplier and the rest
+    at normal demand. Only the peak day really reaches 2.5x in the data, so this
+    overstates the festive contribution, which makes "Diwali barely moves the
+    yearly figure" a conservative conclusion.
+    """
+    prof = profit_settings(localities, facilities, demand, econ)
+    models = {"orders": {}, "profit": prof}
+    festive = demand * festive_multiplier
+    reference = {
+        "normal": reference_network(localities, facilities, distances, mask, demand),
+        "festive": reference_network(localities, facilities, distances, mask, festive),
+    }
+
+    def day_profit(result, level):
+        extra = ec.contribution_per_day(result, econ) - ec.contribution_per_day(reference[level], econ)
+        running = ec.running_cost_per_day(result.facilities, econ)[result.new_site_flags].sum()
+        return extra - running
+
+    rows = []
+    for model, settings in models.items():
+        # Each network is routed by its own model's rule. Running costs only
+        # matter when choosing stores, and the stores are fixed by then.
+        routing = {k: v for k, v in settings.items() if k != "running_cost"}
+        for budget_cr in budgets_cr:
+            plan = optimize_network(localities, facilities, distances, mask, demand,
+                                    budget_cr * 1e7, **settings)
+            keys = set(plan.opened_sites()["facility_key"])
+            normal = solve_fixed_network(localities, facilities, distances, mask, demand, keys, **routing)
+            rush = solve_fixed_network(localities, facilities, distances, mask, festive, keys, **routing)
+
+            p_normal = day_profit(normal, "normal")
+            p_festive = day_profit(rush, "festive")
+            yearly = (365 - festive_days) * p_normal + festive_days * p_festive
+            capex = plan.capex_used
+
+            rows.append({
+                "model": model,
+                "budget_cr": budget_cr,
+                "new_stores": len(keys),
+                "capex_cr": round(capex / 1e7, 2),
+                "normal_coverage_pct": round(normal.coverage_pct, 1),
+                "normal_utilisation_pct": round(normal.capacity_utilisation_pct, 1),
+                "festive_coverage_pct": round(rush.coverage_pct, 1),
+                "festive_utilisation_pct": round(rush.capacity_utilisation_pct, 1),
+                "profit_cr_per_year": round(yearly / 1e7, 2),
+                "profit_cr_no_festival": round(365 * p_normal / 1e7, 2),
+                "roce_pct": round(100 * yearly / capex, 1) if capex else None,
+            })
+    return pd.DataFrame(rows)

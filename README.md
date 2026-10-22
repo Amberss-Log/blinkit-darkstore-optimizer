@@ -80,7 +80,7 @@ python -m venv .venv
 pip install -r requirements.txt
 
 python generate_data.py          # builds and fills the database
-python -m pytest                 # 39 tests
+python -m pytest                 # 46 tests
 jupyter lab notebook.ipynb
 ```
 
@@ -110,7 +110,7 @@ src/economics.py      order value, loyalty, running costs, the derived margin, p
 src/compare.py        runs every objective on the same inputs and tabulates them
 src/forecast.py       ridge regression demand forecast
 src/plots.py          figures
-tests/                39 tests, including a toy problem small enough to solve by hand
+tests/                46 tests, including a toy problem small enough to solve by hand
 ```
 
 ## Results
@@ -166,6 +166,16 @@ drops service to low-income areas from 10.5% to none and costs about ₹0.3 cror
 loyal customers are worth more than today's profit shows, and that can only be tested against real retention
 data.
 
+### Spending more
+
+Every plan above runs its stores at full capacity, because ₹20 crore buys less capacity than the city needs. To
+check whether a bigger budget would help, I raised it to ₹30, ₹40 and ₹60 crore, planned each network for
+normal days, then ran the same stores at 2.5 times demand. Past about ₹34 crore nothing more is worth building:
+almost all normal demand is already served, so the ₹40 and ₹60 crore plans are identical and leave money
+unspent. The stores still run about 99% full on normal days, because neither model builds stores to sit idle,
+so festival coverage tops out at 40%. More capex earns more (₹13.75 crore a year at ₹34 crore against ₹10.02
+crore at ₹20 crore) but at a lower return on capital, 40.2% against 50.6%. Spending more buys coverage on
+normal days, not festival capacity, which is why peaks are better met with temporary capacity.
 ## Limitations
 
 **The data is synthetic.** Totals are calibrated to disclosed figures, but everything at the locality level,
